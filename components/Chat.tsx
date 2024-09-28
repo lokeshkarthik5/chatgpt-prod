@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,12 +17,14 @@ interface Conversation {
   createdAt: string;
 }
 
-const Sidebar: React.FC<{
+interface SidebarProps {
   conversations: Conversation[];
   activeConversation: string;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
-}> = React.memo(({ conversations, activeConversation, onSelectConversation, onNewConversation }) => (
+}
+
+const Sidebar: React.FC<SidebarProps> = React.memo(({ conversations, activeConversation, onSelectConversation, onNewConversation }) => (
   <div className="w-64 bg-[#171717] h-screen p-4 text-white">
     <button
       onClick={onNewConversation}
@@ -44,18 +46,19 @@ const Sidebar: React.FC<{
   </div>
 ));
 
-Sidebar.displayName = 'Sidebar';
+Sidebar.displayName = 'SideBar';
 
-
-const MessageItem: React.FC<{
+interface MessageItemProps {
   message: Message;
   onEdit: (id: string) => void;
   isEditing: boolean;
   onUpdate: (id: string, content: string) => void;
-}> = React.memo(({ message, onEdit, isEditing, onUpdate }) => (
+}
+
+const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onEdit, isEditing, onUpdate }) => (
   <div className={`mb-2 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
     {message.role === 'user' && isEditing ? (
-      <form onSubmit={(e) => {
+      <form onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const input = e.currentTarget.querySelector('input') as HTMLInputElement;
         onUpdate(message.id, input.value);
@@ -94,7 +97,6 @@ const MessageItem: React.FC<{
 
 MessageItem.displayName = 'MessageItem';
 
-
 const Chat: React.FC = () => {
   const [input, setInput] = useState<string>('');
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -107,8 +109,8 @@ const Chat: React.FC = () => {
     try {
       const response = await fetch('/api/list');
       if (!response.ok) throw new Error('Failed to fetch conversations');
-      const data = await response.json();
-      setConversations(data || []);
+      const data: Conversation[] = await response.json();
+      setConversations(data);
     } catch (error) {
       console.error('Error fetching conversations:', error);
       setConversations([]);
@@ -119,10 +121,10 @@ const Chat: React.FC = () => {
     try {
       const response = await fetch(`/api/list?conversationId=${conversationId}`);
       if (!response.ok) throw new Error('Failed to fetch messages');
-      const data = await response.json();
-      const formattedMessages: Message[] = data.messages.flatMap((msg: { userMessage: string; assistantResponse: string; createdAt: string }, index: number) => [
-        { id: `user-${index}`, role: 'user', content: msg.userMessage, createdAt: msg.createdAt },
-        { id: `assistant-${index}`, role: 'assistant', content: msg.assistantResponse, createdAt: msg.createdAt }
+      const data: { messages: { userMessage: string; assistantResponse: string; createdAt: string }[] } = await response.json();
+      const formattedMessages: Message[] = data.messages.flatMap((msg, index) => [
+        { id: `user-${index}`, role: 'user' as const, content: msg.userMessage, createdAt: msg.createdAt },
+        { id: `assistant-${index}`, role: 'assistant' as const, content: msg.assistantResponse, createdAt: msg.createdAt }
       ]);
       setActiveMessages(formattedMessages);
     } catch (error) {
@@ -167,7 +169,7 @@ const Chat: React.FC = () => {
         throw new Error('Failed to generate');
       }
 
-      const data = await response.json();
+      const data: string = await response.json();
 
       const assistantMessage: Message = { 
         id: uuidv4(), 
@@ -232,7 +234,7 @@ const Chat: React.FC = () => {
         throw new Error('Failed to generate');
       }
 
-      const data = await response.json();
+      const data: string = await response.json();
 
       setActiveMessages(prev => {
         const updatedIndex = prev.findIndex(msg => msg.id === messageId);
@@ -282,7 +284,7 @@ const Chat: React.FC = () => {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
             className="flex-grow bg-[#2f2f2f] text-white border border-[#4a4a4a] rounded-l p-2"
             placeholder="Type your message..."
           />
@@ -298,5 +300,7 @@ const Chat: React.FC = () => {
     </div>
   );
 };
+
+Chat.displayName = 'Chat';
 
 export default Chat;
