@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import sql from "@/db";
+
 
 // Ensure table exists before querying
 async function createTableIfNotExists() {
@@ -47,70 +48,48 @@ async function ensureTableExists() {
 }
 
 // Handle GET request
-export async function GET(request: Request) {
+export async function GET(req:NextRequest) {
   try {
     await ensureTableExists();
 
-    const { searchParams } = new URL(request.url);
-    const conversationId = searchParams.get('conversationId'); // Get conversationId from URL
-
-    let result;
+    const { searchParams } = new URL(req.url);
+    const conversationId = searchParams.get('conversationId');
 
     if (conversationId) {
-      // Fetch all messages for a specific conversation
-      result = await sql`
-        SELECT
-          conversation_id as id,
-          user_message,
-          assistant_response,
-          created_at
+      // Fetch messages for a specific conversation
+      const messages = await sql`
+        SELECT user_message, assistant_response, created_at
         FROM conversations
         WHERE conversation_id = ${conversationId}
         ORDER BY created_at ASC
       `;
-
-      if (result.length === 0) {
-        return NextResponse.json({ error: 'No messages found for this conversation' }, { status: 404 });
-      }
-
-      // Prepare messages by combining user_message and assistant_response
-      const messages = result.map(row => ({
-        userMessage: row.user_message,
-        assistantResponse: row.assistant_response,
-        createdAt: row.created_at,
-      }));
-
-      console.log("GET request result for conversationId:", messages);
-      return NextResponse.json({ conversationId, messages });
+      return NextResponse.json({ messages });
     } else {
-      // Fetch all distinct conversations
-      result = await sql`
+      // Fetch all conversations
+      const result = await sql`
         SELECT DISTINCT ON (conversation_id)
           conversation_id as id,
-          user_message,
-          assistant_response,
+          user_message as first_message,
+          assistant_response as response_message,
           created_at
         FROM conversations
-        ORDER BY conversation_id, created_at ASC
+        ORDER BY conversation_id, created_at DESC
       `;
-
-      if (result.length === 0) {
-        return NextResponse.json({ error: 'No conversations found' }, { status: 404 });
-      }
-
-      // Prepare response with distinct conversation IDs and first user message
+      
       const conversations = result.map(row => ({
         id: row.id,
-        firstMessage: row.user_message,
-        responeMessage:row.assistant_response,
-        createdAt: row.created_at,
+        firstMessage: row.first_message,
+        responseMessage: row.response_message,
+        createdAt: row.created_at
       }));
 
-      console.log("GET request result for all conversations:", conversations);
       return NextResponse.json(conversations);
     }
-  } catch (error: unknown) {
-    console.error('Error fetching conversations:', error);
-    return NextResponse.json({ error: 'An error occurred', details: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  } catch (error:unknown) {
+    console.error('Error in GET request:', error);
+    return NextResponse.json(
+      { error: 'An error occurred', details: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }

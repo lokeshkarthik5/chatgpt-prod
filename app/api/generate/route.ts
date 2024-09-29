@@ -48,27 +48,53 @@ async function ensureTableExists() {
   }
 }
 
+function convertMarkdownToPlainText(markdown: string): string {
+  // This is a simple conversion. For more complex markdown, consider using a library.
+  return markdown
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Bold
+    .replace(/\*(.*?)\*/g, '$1')     // Italic
+    .replace(/`(.*?)`/g, '$1')       // Inline code
+    .replace(/^#+\s*(.*)$/gm, '$1')  // Headers
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Links
+    .replace(/^\s*[-*+]\s/gm, '')    // Unordered lists
+    .replace(/^\s*\d+\.\s/gm, '')    // Ordered lists
+    .trim();
+}
+
 export async function POST(req: NextRequest) {
   try {
     await ensureTableExists();
 
-    const { prompt, conversationId } = await req.json();
+    const { prompt, conversationId,convertToPlainText = false  } = await req.json();
+
+    // Fetch previous messages for the conversation
+    const previousMessages = await sql`
+      SELECT user_message, assistant_response
+      FROM conversations
+      WHERE conversation_id = ${conversationId}
+      ORDER BY created_at ASC
+    `;
+
+    // Prepare the messages array for the Groq API
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: "You are an intelligent LLM model" },
+      ...previousMessages.flatMap(msg => [
+        { role: 'user' as const, content: msg.user_message },
+        { role: 'assistant' as const, content: msg.assistant_response }
+      ]),
+      { role: "user" as const, content: prompt }
+    ];
 
     const gen = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'assistant',
-          content: "You are an intelligent LLM model"
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
+      messages,
       model: "llama3-70b-8192"
     });
 
-    const response = gen?.choices?.[0].message?.content;
+    let response = gen?.choices?.[0]?.message?.content;
+
+    if (convertToPlainText && response) {
+      response = convertMarkdownToPlainText(response!);
+    }
 
     if (response) {
       const insertResult = await sql`
@@ -85,35 +111,6 @@ export async function POST(req: NextRequest) {
     console.error("Error in POST request:", error);
     return NextResponse.json(
       { error: "An error occurred", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
-  }
-}
-
-
-export async function GET() {
-  try {
-    await ensureTableExists();
-
-    const result = await sql`
-      SELECT DISTINCT ON (conversation_id)
-        conversation_id as id,
-        user_message as content
-      FROM conversations
-      ORDER BY conversation_id, created_at ASC
-    `;
-    
-    const conversations = result.map(row => ({
-      id: row.id,
-      messages: [{ content: row.content }]
-    }));
-
-    console.log("GET request result:", conversations);
-    return NextResponse.json(conversations);
-  } catch (error:unknown) {
-    console.error('Error fetching conversations:', error);
-    return NextResponse.json(
-      { error: 'An error occurred', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }

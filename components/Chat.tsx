@@ -25,7 +25,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = React.memo(({ conversations, activeConversation, onSelectConversation, onNewConversation }) => (
-  <div className="w-64 bg-[#171717] h-screen p-4 text-white">
+  <div className="w-64 bg-[#171717] h-screen p-4 text-white overflow-y-auto">
     <button
       onClick={onNewConversation}
       className="w-full bg-black text-white p-2 rounded mb-4 hover:bg-gray-900"
@@ -56,7 +56,7 @@ interface MessageItemProps {
 }
 
 const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onEdit, isEditing, onUpdate }) => (
-  <div className={`mb-2 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+  <div className={`mb-4 ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
     {message.role === 'user' && isEditing ? (
       <form onSubmit={(e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -66,10 +66,10 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onEdit, i
         <input
           type="text"
           defaultValue={message.content}
-          className="bg-[#2f2f2f] text-white border border-[#4a4a4a] rounded p-1 mr-2"
+          className="bg-[#2f2f2f] text-white border border-[#4a4a4a] rounded p-1 mr-2 w-full"
           autoFocus
         />
-        <button type="submit" className="bg-blue-500 text-white px-2 py-1 rounded">
+        <button type="submit" className="bg-blue-500 text-white px-2 py-1 rounded mt-2">
           Update
         </button>
       </form>
@@ -77,7 +77,7 @@ const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onEdit, i
       <>
         <span
           className={`inline-block p-2 rounded ${
-            message.role === 'user' ? 'bg-blue-500' : 'bg-transparent'
+            message.role === 'user' ? 'bg-blue-500' : 'bg-gray-700'
           }`}
         >
           {message.content}
@@ -121,10 +121,10 @@ const Chat: React.FC = () => {
     try {
       const response = await fetch(`/api/list?conversationId=${conversationId}`);
       if (!response.ok) throw new Error('Failed to fetch messages');
-      const data: { messages: { userMessage: string; assistantResponse: string; createdAt: string }[] } = await response.json();
-      const formattedMessages: Message[] = data.messages.flatMap((msg, index) => [
-        { id: `user-${index}`, role: 'user' as const, content: msg.userMessage, createdAt: msg.createdAt },
-        { id: `assistant-${index}`, role: 'assistant' as const, content: msg.assistantResponse, createdAt: msg.createdAt }
+      const data: { messages: { user_message: string; assistant_response: string; created_at: string }[] } = await response.json();
+      const formattedMessages: Message[] = data.messages.flatMap((msg) => [
+        { id: `user-${uuidv4()}`, role: 'user', content: msg.user_message, createdAt: msg.created_at },
+        { id: `assistant-${uuidv4()}`, role: 'assistant', content: msg.assistant_response, createdAt: msg.created_at }
       ]);
       setActiveMessages(formattedMessages);
     } catch (error) {
@@ -162,11 +162,11 @@ const Chat: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt: input, conversationId }),
+        body: JSON.stringify({ prompt: input, conversationId,convertToPlainText: true }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate');
+        throw new Error('Failed to generate response');
       }
 
       const data: string = await response.json();
@@ -180,16 +180,8 @@ const Chat: React.FC = () => {
 
       setActiveMessages(prev => [...prev, assistantMessage]);
 
-      setConversations(prev => {
-        const existingIndex = prev.findIndex(conv => conv.id === conversationId);
-        if (existingIndex !== -1) {
-          const updated = [...prev];
-          updated[existingIndex] = { ...updated[existingIndex], firstMessage: input };
-          return updated;
-        } else {
-          return [...prev, { id: conversationId, firstMessage: input, responseMessage: data, createdAt: new Date().toISOString() }];
-        }
-      });
+      // Update conversations list
+      await fetchConversations();
 
     } catch (error) {
       console.error(error);
@@ -198,7 +190,7 @@ const Chat: React.FC = () => {
 
     setLoading(false);
     setInput('');
-  }, [input, activeConversation]);
+  }, [input, activeConversation, fetchConversations]);
 
   const handleNewConversation = useCallback(() => {
     const newId = uuidv4();
@@ -231,7 +223,7 @@ const Chat: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate');
+        throw new Error('Failed to generate response');
       }
 
       const data: string = await response.json();
@@ -246,13 +238,16 @@ const Chat: React.FC = () => {
           return [...prev, { id: uuidv4(), role: 'assistant', content: data, createdAt: new Date().toISOString() }];
         }
       });
+
+      // Update conversations list
+      await fetchConversations();
     } catch (error) {
       console.error(error);
       setActiveMessages(prev => [...prev, { id: uuidv4(), role: 'assistant', content: 'Sorry, an error occurred', createdAt: new Date().toISOString() }]);
     }
 
     setLoading(false);
-  }, [activeConversation]);
+  }, [activeConversation, fetchConversations]);
 
   const memoizedSidebar = useMemo(() => (
     <Sidebar
