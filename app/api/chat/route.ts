@@ -1,16 +1,61 @@
 import { NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
 import Groq from "groq-sdk";
 
+const prisma = new PrismaClient();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { message, conversationId, editedMessageId } = await req.json();
 
-    const cleanedMessages = messages.map(({ role, content }: { role: string; content: string }) => ({ role, content }));
+    if (!message || !conversationId) {
+      return NextResponse.json({ error: 'Invalid input' }, { status: 400 });
+    }
+
+    let conversation;
+
+    if (editedMessageId) {
+      const originalConversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        include: { messages: true },
+      });
+
+      if (!originalConversation) {
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+      }
+
+      const editIndex = originalConversation.messages.findIndex(m => m.id === editedMessageId);
+      const messagesToKeep = originalConversation.messages.slice(0, editIndex);
+
+      conversation = await prisma.conversation.create({
+        data: {
+          parentId: conversationId,
+          messages: {
+            create: [
+              ...messagesToKeep.map(m => ({ role: m.role, content: m.content })),
+              { role: 'user', content: message },
+            ],
+          },
+        },
+        include: { messages: true },
+      });
+    } else {
+      conversation = await prisma.conversation.update({
+        where: { id: conversationId },
+        data: {
+          messages: {
+            create: { role: 'user', content: message },
+          },
+        },
+        include: { messages: true },
+      });
+    }
+
+    const formattedMessages = conversation.messages.map(({ role, content }) => ({ role, content }));
 
     const res = await groq.chat.completions.create({
-      messages: cleanedMessages,  // Changed from 'cleanedMessages' to 'messages'
+      messages: formattedMessages,
       model: "llama3-70b-8192"
     });
 
@@ -20,9 +65,29 @@ export async function POST(req: Request) {
       throw new Error('No response from Groq API');
     }
 
-    return NextResponse.json({ response });
+    const updatedConversation = await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        messages: {
+          create: { role: 'assistant', content: response },
+        },
+        title: conversation.messages[0]?.content.split(' ')[0] || 'New Conversation',
+      },
+      include: {
+        messages: true,
+        children: {
+          include: {
+            messages: true,
+          },
+        },
+      },
+    });
+
+    return NextResponse.json(updatedConversation);
   } catch (error) {
     console.error('Error in chat API route:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } finally {
+    await prisma.$disconnect();
   }
 }

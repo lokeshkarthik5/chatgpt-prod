@@ -14,30 +14,22 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-
-// prisma/schema.prisma
-
 model Conversation {
-  id          String    @id @default(cuid())
-  title       String
-  createdAt   DateTime  @default(now())
-  messages    Message[]
+  id        String    @id @default(cuid())
+  title     String
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  parentId  String?
+  parent    Conversation?  @relation("ConversationChildren", fields: [parentId], references: [id])
+  children  Conversation[] @relation("ConversationChildren")
 }
 
 model Message {
-  id             String    @id @default(cuid())
+  id             String       @id @default(cuid())
+  role           String
   content        String
-  isUser         Boolean   @default(true)
-  createdAt      DateTime  @default(now())
   conversationId String
-  conversation    Conversation @relation(fields: [conversationId], references: [id])
-  edits           Edit[]
-}
-
-model Edit {
-  id        String    @id @default(cuid())
-  content   String
-  createdAt DateTime  @default(now())
-  messageId String
-  message   Message   @relation(fields: [messageId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
 }

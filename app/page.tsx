@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useToast } from "@/hooks/use-toast"
-import { Pencil, Check, X, Plus } from 'lucide-react'
+import { Pencil, Check, X, Plus, ChevronRight } from 'lucide-react'
 import { cn } from "@/lib/utils"
 
 type Message = {
@@ -19,11 +19,13 @@ type Conversation = {
   id: string;
   messages: Message[];
   title: string;
+  parentId: string | null;
+  children: Conversation[];
 }
 
 export default function ChatGPT() {
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [currentConversationIndex, setCurrentConversationIndex] = useState(0)
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
@@ -31,32 +33,58 @@ export default function ChatGPT() {
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (conversations.length === 0) {
-      setConversations([{ id: '1', messages: [], title: 'New Conversation' }])
-    }
-  }, [conversations])
+    fetchConversations()
+  }, [])
 
   useEffect(() => {
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
     }
-  }, [conversations])
+  }, [conversations, currentConversationId])
 
-  const currentConversation = conversations[currentConversationIndex] || { id: '1', messages: [], title: 'New Conversation' }
+  const fetchConversations = async () => {
+    try {
+      const response = await fetch('/api/conversations')
+      if (!response.ok) {
+        throw new Error('Failed to fetch conversations')
+      }
+      const fetchedConversations = await response.json()
+      setConversations(Array.isArray(fetchedConversations) ? fetchedConversations : [])
+      if (fetchedConversations.length > 0 && !currentConversationId) {
+        setCurrentConversationId(fetchedConversations[0].id)
+      }
+    } catch (error) {
+      console.error('Error fetching conversations:', error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch conversations. Please try again.",
+        variant: "destructive",
+      })
+      setConversations([])
+    }
+  }
+
+  const findConversationById = (id: string, convs: Conversation[]): Conversation | null => {
+    for (const conv of convs) {
+      if (conv.id === id) {
+        return conv
+      }
+      if (conv.children) {
+        const found = findConversationById(id, conv.children)
+        if (found) {
+          return found
+        }
+      }
+    }
+    return null
+  }
+
+  const currentConversation = currentConversationId
+    ? findConversationById(currentConversationId, conversations)
+    : null
 
   const handleSendMessage = async (messageToSend: string, editedMessageId: string | null = null) => {
-    if (!messageToSend.trim()) return
-
-    const newMessage: Message = { id: Date.now().toString(), role: 'user', content: messageToSend }
-    
-    let updatedMessages: Message[]
-    updatedMessages = [...currentConversation.messages, newMessage]
-
-    setConversations(prevConversations => 
-      prevConversations.map((conv, index) => 
-        index === currentConversationIndex ? { ...conv, messages: updatedMessages } : conv
-      )
-    )
+    if (!messageToSend.trim() || !currentConversationId) return
 
     setInputMessage('')
     setIsLoading(true)
@@ -69,40 +97,45 @@ export default function ChatGPT() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          messages: updatedMessages.map(({ role, content }) => ({ role, content }))
+          message: messageToSend,
+          conversationId: currentConversationId,
+          editedMessageId
         }),
       })
 
       if (!response.ok) {
-        throw new Error('Failed to get response')
+        throw new Error('Failed to send message')
       }
 
-      const data = await response.json()
-      const assistantMessage: Message = { id: Date.now().toString(), role: 'assistant', content: data.response }
+      const updatedConversation = await response.json()
       
-      setConversations(prevConversations => 
-        prevConversations.map((conv, index) => 
-          index === currentConversationIndex
-            ? { ...conv, messages: [...updatedMessages, assistantMessage] } 
-            : conv
-        )
-      )
-
-      // Update conversation title if it's the first message
-      if (updatedMessages.length === 1) {
-        setConversations(prevConversations =>
-          prevConversations.map((conv, index) =>
-            index === currentConversationIndex
-              ? { ...conv, title: messageToSend.slice(0, 30) + (messageToSend.length > 30 ? '...' : '') }
-              : conv
-          )
-        )
-      }
+      setConversations(prevConversations => {
+        const updateConversationInTree = (convs: Conversation[]): Conversation[] => {
+          return convs.map(conv => {
+            if (conv.id === updatedConversation.id) {
+              return {
+                ...updatedConversation,
+                title: updatedConversation.messages[0]?.content.split(' ')[0] || 'New Conversation',
+                children: conv.children || []
+              }
+            }
+            if (conv.children) {
+              return {
+                ...conv,
+                children: updateConversationInTree(conv.children)
+              }
+            }
+            return conv
+          })
+        }
+        return updateConversationInTree(prevConversations)
+      })
+      setCurrentConversationId(updatedConversation.id)
     } catch (error) {
-      console.error('Error fetching response:', error)
+      console.error('Error sending message:', error)
       toast({
         title: "Error",
-        description: "Failed to get a response. Please try again.",
+        description: "Failed to send message. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -111,7 +144,7 @@ export default function ChatGPT() {
   }
 
   const handleEditMessage = (messageId: string) => {
-    const messageToEdit = currentConversation.messages.find(m => m.id === messageId)
+    const messageToEdit = currentConversation?.messages.find(m => m.id === messageId)
     if (messageToEdit) {
       setInputMessage(messageToEdit.content)
       setEditingMessageId(messageId)
@@ -123,14 +156,60 @@ export default function ChatGPT() {
     setEditingMessageId(null)
   }
 
-  const handleNewConversation = () => {
-    const newConversation: Conversation = {
-      id: Date.now().toString(),
-      messages: [],
-      title: 'New Conversation'
+  const handleNewConversation = async () => {
+    try {
+      const response = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: 'New Conversation' }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to create new conversation')
+      }
+
+      const newConversation = await response.json()
+      setConversations(prevConversations => [...prevConversations, {...newConversation, children: []}])
+      setCurrentConversationId(newConversation.id)
+    } catch (error) {
+      console.error('Error creating new conversation:', error)
+      toast({
+        title: "Error",
+        description: "Failed to create a new conversation. Please try again.",
+        variant: "destructive",
+      })
     }
-    setConversations([...conversations, newConversation])
-    setCurrentConversationIndex(conversations.length)
+  }
+
+  const renderConversationTree = (convs: Conversation[], depth = 0) => {
+    return convs.map((conv) => (
+      <div key={conv.id} className={`mb-2 ${depth > 0 ? 'ml-4' : ''}`}>
+        <Button
+          variant={conv.id === currentConversationId ? "secondary" : "ghost"}
+          className={cn(
+            "w-full justify-start overflow-hidden",
+            conv.id === currentConversationId ? "bg-secondary" : ""
+          )}
+          onClick={() => setCurrentConversationId(conv.id)}
+        >
+          {depth > 0 && <ChevronRight className="mr-2 h-4 w-4" />}
+          {conv.title}
+        </Button>
+        {conv.children && conv.children.length > 0 && renderConversationTree(conv.children, depth + 1)}
+      </div>
+    ))
+  }
+
+  const renderMessageContent = (content: string) => {
+    const parts = content.split(/(\*\*[^*]+\*\*)/)
+    return parts.map((part, index) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={index}>{part.slice(2, -2)}</strong>
+      }
+      return <span key={index}>{part}</span>
+    })
   }
 
   return (
@@ -140,47 +219,39 @@ export default function ChatGPT() {
         <Button onClick={handleNewConversation} className="w-full mb-4">
           <Plus className="mr-2 h-4 w-4" /> New Conversation
         </Button>
-        {conversations.map((conv, index) => (
-          <Button
-            key={conv.id}
-            variant={index === currentConversationIndex ? "secondary" : "ghost"}
-            className={cn(
-              "w-full justify-start mb-2 overflow-hidden",
-              index === currentConversationIndex ? "bg-secondary" : ""
-            )}
-            onClick={() => setCurrentConversationIndex(index)}
-          >
-            {conv.title}
-          </Button>
-        ))}
+        {renderConversationTree(conversations)}
       </div>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col p-4">
-        <h1 className="text-2xl font-bold mb-4">{currentConversation.title}</h1>
+        <h1 className="text-2xl font-bold mb-4">{currentConversation?.title || 'New Conversation'}</h1>
         <ScrollArea className="flex-grow mb-4 p-4 border rounded-md" ref={scrollAreaRef}>
-          {currentConversation.messages.map((message) => (
-            <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-              <div className={`flex items-start ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                <Avatar className="w-8 h-8">
-                  <AvatarFallback>{message.role === 'user' ? 'U' : 'AI'}</AvatarFallback>
-                </Avatar>
-                <div className={`mx-2 p-2 rounded-lg ${message.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
-                  {message.content}
+          {currentConversation?.messages && currentConversation.messages.length > 0 ? (
+            currentConversation.messages.map((message) => (
+              <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+                <div className={`flex items-start ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <Avatar className="w-8 h-8">
+                    <AvatarFallback>{message.role === 'user' ? 'U' : 'AI'}</AvatarFallback>
+                  </Avatar>
+                  <div className={`mx-2 p-2 rounded-lg ${message.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
+                    {renderMessageContent(message.content)}
+                  </div>
+                  {message.role === 'user' && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleEditMessage(message.id)}
+                      className="ml-2"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
-                {message.role === 'user' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleEditMessage(message.id)}
-                    className="ml-2"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                )}
               </div>
-            </div>
-          ))}
+            ))
+          ) : (
+            <div className="text-center text-gray-500">No messages yet. Start a conversation!</div>
+          )}
           {isLoading && (
             <div className="flex justify-start mb-4">
               <div className="flex items-center bg-gray-200 rounded-lg p-2">
