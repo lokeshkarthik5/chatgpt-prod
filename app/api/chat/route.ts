@@ -31,6 +31,7 @@ export async function POST(req: Request) {
       conversation = await prisma.conversation.create({
         data: {
           parentId: conversationId,
+          title: messagesToKeep[0]?.content.split(' ')[0] || 'Edited Conversation',
           messages: {
             create: [
               ...messagesToKeep.map(m => ({ role: m.role, content: m.content })),
@@ -52,7 +53,10 @@ export async function POST(req: Request) {
       });
     }
 
-    const formattedMessages = conversation.messages.map(({ role, content }) => ({ role, content }));
+    const formattedMessages = conversation.messages.map(({ role, content }) => ({
+      role: role as 'system' | 'user' | 'assistant',
+      content
+    }));
 
     const res = await groq.chat.completions.create({
       messages: formattedMessages,
