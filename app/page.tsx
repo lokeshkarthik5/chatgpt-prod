@@ -119,7 +119,26 @@ export default function ChatGPT() {
 
     setInputMessage('')
     setIsLoading(true)
-    setEditingMessageId(null)
+
+    // Optimistic update
+    const tempId = Date.now().toString()
+    const optimisticMessage: Message = {
+      id: tempId,
+      role: 'user',
+      content: messageToSend
+    }
+
+    setConversations(prevConversations => {
+      return prevConversations.map(conv => {
+        if (conv.id === currentConversationId) {
+          const updatedMessages = editedMessageId
+            ? conv.messages.map(msg => msg.id === editedMessageId ? optimisticMessage : msg)
+            : [...conv.messages, optimisticMessage]
+          return { ...conv, messages: updatedMessages }
+        }
+        return conv
+      })
+    })
 
     try {
       const response = await fetch('/api/chat', {
@@ -141,7 +160,6 @@ export default function ChatGPT() {
 
       const updatedConversation = await response.json()
       updateConversationInState(updatedConversation)
-      setCurrentConversationId(updatedConversation.id)
     } catch (error) {
       console.error('Error sending message:', error)
       toast({
@@ -149,8 +167,21 @@ export default function ChatGPT() {
         description: error instanceof Error ? error.message : "Failed to send message. Please try again.",
         variant: "destructive",
       })
+      // Revert optimistic update on error
+      setConversations(prevConversations => {
+        return prevConversations.map(conv => {
+          if (conv.id === currentConversationId) {
+            const revertedMessages = editedMessageId
+              ? conv.messages
+              : conv.messages.filter(msg => msg.id !== tempId)
+            return { ...conv, messages: revertedMessages }
+          }
+          return conv
+        })
+      })
     } finally {
       setIsLoading(false)
+      setEditingMessageId(null)
     }
   }
 
