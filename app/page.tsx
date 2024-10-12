@@ -83,8 +83,39 @@ export default function ChatGPT() {
     ? findConversationById(currentConversationId, conversations)
     : null
 
+  const updateConversationInState = (updatedConversation: Conversation) => {
+    setConversations(prevConversations => {
+      const updateConversationInTree = (convs: Conversation[]): Conversation[] => {
+        return convs.map(conv => {
+          if (conv.id === updatedConversation.id) {
+            return {
+              ...updatedConversation,
+              title: updatedConversation.messages[0]?.content.split(' ').slice(0, 3).join(' ') || 'New Conversation',
+              children: conv.children || []
+            }
+          }
+          if (conv.children) {
+            return {
+              ...conv,
+              children: updateConversationInTree(conv.children)
+            }
+          }
+          return conv
+        })
+      }
+      return updateConversationInTree(prevConversations)
+    })
+  }
+
   const handleSendMessage = async (messageToSend: string, editedMessageId: string | null = null) => {
-    if (!messageToSend.trim() || !currentConversationId) return
+    if (!messageToSend.trim() || !currentConversationId) {
+      toast({
+        title: "Error",
+        description: "Please enter a message and select a conversation.",
+        variant: "destructive",
+      })
+      return
+    }
 
     setInputMessage('')
     setIsLoading(true)
@@ -104,38 +135,18 @@ export default function ChatGPT() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to send message')
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to send message')
       }
 
       const updatedConversation = await response.json()
-      
-      setConversations(prevConversations => {
-        const updateConversationInTree = (convs: Conversation[]): Conversation[] => {
-          return convs.map(conv => {
-            if (conv.id === updatedConversation.id) {
-              return {
-                ...updatedConversation,
-                title: updatedConversation.messages[0]?.content.split(' ')[0] || 'New Conversation',
-                children: conv.children || []
-              }
-            }
-            if (conv.children) {
-              return {
-                ...conv,
-                children: updateConversationInTree(conv.children)
-              }
-            }
-            return conv
-          })
-        }
-        return updateConversationInTree(prevConversations)
-      })
+      updateConversationInState(updatedConversation)
       setCurrentConversationId(updatedConversation.id)
     } catch (error) {
       console.error('Error sending message:', error)
       toast({
         title: "Error",
-        description: "Failed to send message. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to send message. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -263,7 +274,7 @@ export default function ChatGPT() {
         <div className="flex space-x-2">
           <Input
             type="text"
-            placeholder={editingMessageId ? "Edit your message.." : "Type your message.."}
+            placeholder={editingMessageId ? "Edit your message..." : "Type your message..."}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={(e) => {
