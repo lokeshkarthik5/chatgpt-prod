@@ -34,7 +34,7 @@ export async function GET() {
 
     return NextResponse.json(processedConversations);
   } catch (error) {
-    console.error('Error fetching conversations:', error);
+    console.log('Error fetching conversations:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   } finally {
     await prisma.$disconnect();
