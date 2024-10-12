@@ -263,7 +263,7 @@ export default function ChatGPT() {
         <div className="flex space-x-2">
           <Input
             type="text"
-            placeholder={editingMessageId ? "Edit your message..." : "Type your message..."}
+            placeholder={editingMessageId ? "Edit your message.." : "Type your message.."}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={(e) => {
