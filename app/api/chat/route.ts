@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import Groq from "groq-sdk";
-
-const prisma = new PrismaClient();
+import prisma from '@/lib/prisma';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 export async function POST(req: Request) {
