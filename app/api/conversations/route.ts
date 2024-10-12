@@ -4,53 +4,36 @@ import prisma from '@/lib/prisma';
 export async function GET() {
   try {
     const conversations = await prisma.conversation.findMany({
+      include: {
+        messages: true,
+        children: {
+          include: {
+            messages: true,
+          },
+        },
+      },
       where: {
         parentId: null,
       },
       orderBy: {
         updatedAt: 'desc',
       },
-      include: {
-        messages: {
-          select: {
-            content: true,
-          },
-        },
-      },
     });
 
-    const processConversations = async (convs: any[]): Promise<any[]> => {
-      const processedConvs = await Promise.all(convs.map(async (conv) => {
-        const children = await prisma.conversation.findMany({
-          where: { parentId: conv.id },
-          include: {
-            messages: {
-              select: {
-                content: true,
-              },
-            },
-          },
-        });
-
-        return {
-          ...conv,
-          title: conv.messages[0]?.content.split(' ')[0] || 'New Conversation',
-          children: await processConversations(children),
-        };
+    const processConversations = (convs: any[]): any[] => {
+      return convs.map(conv => ({
+        ...conv,
+        title: conv.messages[0]?.content.split(' ')[0] || 'New Conversation',
+        children: processConversations(conv.children || []),
       }));
-
-      return processedConvs;
     };
 
-    const processedConversations = await processConversations(conversations);
+    const processedConversations = processConversations(conversations);
 
     return NextResponse.json(processedConversations);
   } catch (error) {
-    console.error('Error fetching conversations:', error);
-    return NextResponse.json({ 
-      error: 'Internal Server Error', 
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    console.log('Error fetching conversations:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   } finally {
     await prisma.$disconnect();
   }
