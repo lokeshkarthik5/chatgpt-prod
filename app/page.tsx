@@ -119,7 +119,6 @@ export default function ChatGPT() {
 
     setInputMessage('')
     setIsLoading(true)
-    setEditingMessageId(null)
 
     try {
       const response = await fetch('/api/chat', {
@@ -140,8 +139,34 @@ export default function ChatGPT() {
       }
 
       const updatedConversation = await response.json()
-      updateConversationInState(updatedConversation)
-      setCurrentConversationId(updatedConversation.id)
+
+      if (editedMessageId) {
+        // Create a new branch
+        setConversations(prevConversations => {
+          const updateConversationInTree = (convs: Conversation[]): Conversation[] => {
+            return convs.map(conv => {
+              if (conv.id === currentConversationId) {
+                return {
+                  ...conv,
+                  children: [...(conv.children || []), updatedConversation]
+                }
+              }
+              if (conv.children) {
+                return {
+                  ...conv,
+                  children: updateConversationInTree(conv.children)
+                }
+              }
+              return conv
+            })
+          }
+          return updateConversationInTree(prevConversations)
+        })
+        setCurrentConversationId(updatedConversation.id)
+      } else {
+        // Update existing conversation
+        updateConversationInState(updatedConversation)
+      }
     } catch (error) {
       console.error('Error sending message:', error)
       toast({
@@ -151,6 +176,7 @@ export default function ChatGPT() {
       })
     } finally {
       setIsLoading(false)
+      setEditingMessageId(null)
     }
   }
 
@@ -225,7 +251,7 @@ export default function ChatGPT() {
 
   return (
     <div className="flex h-screen">
-      
+      {/* Sidebar */}
       <div className="w-64 bg-gray-100 p-4 overflow-auto">
         <Button onClick={handleNewConversation} className="w-full mb-4">
           <Plus className="mr-2 h-4 w-4" /> New Conversation
